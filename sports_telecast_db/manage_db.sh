@@ -119,6 +119,8 @@ run_migrations() {
     migrations=(
         "001_initial_schema.sql:Initial database schema"
         "002_seed_data.sql:Seed data population"
+        "008_emoji_schema_indices.sql:Emoji schema alignment, FKs, and indices"
+        "009_seed_emoji_assets_basic.sql:Seed core emoji assets (heart, clap, fire, wow/love)"
     )
     
     for migration in "${migrations[@]}"; do
