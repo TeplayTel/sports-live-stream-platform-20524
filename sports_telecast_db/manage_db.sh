@@ -121,6 +121,8 @@ run_migrations() {
         "002_seed_data.sql:Seed data population"
         "008_emoji_schema_indices.sql:Emoji schema alignment, FKs, and indices"
         "009_seed_emoji_assets_basic.sql:Seed core emoji assets (heart, clap, fire, wow/love)"
+        "010_upsert_core_emojis.sql:Upsert/refresh core emoji assets and ensure emoji_path"
+        "011_create_emoji_reactions_table.sql:Create/align emoji_reactions table with FKs, indices, and triggers"
     )
     
     for migration in "${migrations[@]}"; do
