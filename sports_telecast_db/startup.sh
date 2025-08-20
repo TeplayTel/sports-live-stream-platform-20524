@@ -91,7 +91,7 @@ END
 GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
 
 -- Connect to the specific database for schema-level permissions
-\c ${DB_NAME}
+\\c ${DB_NAME}
 
 -- For PostgreSQL 15+, we need to handle public schema permissions differently
 -- First, grant usage on public schema
@@ -126,7 +126,7 @@ GRANT ALL ON SCHEMA public TO ${DB_USER};
 GRANT CREATE ON SCHEMA public TO ${DB_USER};
 
 -- Show current permissions for debugging
-\dn+ public
+\\dn+ public
 EOF
 
 # Save connection command to a file
@@ -141,6 +141,12 @@ export POSTGRES_PASSWORD="${DB_PASSWORD}"
 export POSTGRES_DB="${DB_NAME}"
 export POSTGRES_PORT="${DB_PORT}"
 EOF
+
+# Optionally apply idempotent alembic version width patch when running outside docker-entrypoint-initdb.d
+if [ -f "docker-entrypoint-initdb.d/01_widen_alembic_version.sql" ]; then
+  echo "Applying alembic_version width patch if needed (idempotent)..."
+  sudo -u postgres ${PG_BIN}/psql -p ${DB_PORT} -d ${DB_NAME} -f docker-entrypoint-initdb.d/01_widen_alembic_version.sql || true
+fi
 
 echo "PostgreSQL setup complete!"
 echo "Database: ${DB_NAME}"

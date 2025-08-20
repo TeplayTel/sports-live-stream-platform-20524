@@ -283,6 +283,18 @@ PGPASSWORD=dbuser123 psql -h localhost -p 5000 -U appuser -d myapp < backup.sql
 - Triggers maintain data consistency automatically
 - The design supports horizontal scaling with proper partitioning
 
+## Docker initialization scripts
+
+The official Postgres image runs any .sql files in docker-entrypoint-initdb.d/ on first-time container initialization. This repository includes:
+- docker-entrypoint-initdb.d/01_widen_alembic_version.sql
+
+Behavior of the alembic_version patch:
+- If public.alembic_version or the version_num column does not exist, it does nothing.
+- If version_num is already VARCHAR with length >= 64 (or unbounded), it does nothing.
+- Otherwise, it alters the column to VARCHAR(64).
+
+This script is idempotent and safe to keep in source control. It prevents migration failures when revision identifiers exceed the previous column length.
+
 ## Next Steps
 
 1. **Backend Integration**: Update FastAPI models to use database instead of mock data
