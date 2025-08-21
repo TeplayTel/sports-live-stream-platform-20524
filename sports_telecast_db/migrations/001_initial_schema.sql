@@ -19,6 +19,7 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(255),
     avatar_url TEXT,
+    -- IMPORTANT: Role labels must be lowercase only to align with backend/OpenAPI and userroleenum.
     role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin', 'moderator')),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

@@ -85,6 +85,7 @@ END$$;
 
 -- 3) Normalize existing role values to lowercase 'user' | 'admin' | 'moderator'
 --    Only execute if users table exists and column role exists.
+--    This step ensures no stray uppercase or unexpected variants remain prior to enum conversion.
 DO $$
 BEGIN
     IF EXISTS (
@@ -92,7 +93,7 @@ BEGIN
         FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role'
     ) THEN
-        -- Update any non-null role values to lowercase
+        -- Update any non-null role values to lowercase (works for varchar/text)
         EXECUTE $sql$
             UPDATE public.users
             SET role = LOWER(role)
@@ -113,9 +114,7 @@ BEGIN
             WHERE role IS NOT NULL AND role NOT IN ('user','admin','moderator')
         $sql$;
 
-        -- If role is NULL for any rows and a NOT NULL constraint is not present,
-        -- set to 'user' so casting to enum won't fail.
-        -- We cannot easily introspect constraint presence here without complex logic; set values anyway (harmless).
+        -- Ensure NULLs are set to 'user'
         EXECUTE $sql$
             UPDATE public.users SET role = 'user' WHERE role IS NULL
         $sql$;

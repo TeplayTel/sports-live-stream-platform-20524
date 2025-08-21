@@ -599,6 +599,21 @@ BEGIN
     (premier_league_id, (SELECT team_id FROM teams WHERE name = 'Tottenham'), (SELECT team_id FROM teams WHERE name = 'Chelsea'), football_sport_id, 'finished', CURRENT_TIMESTAMP - INTERVAL '2 weeks', CURRENT_TIMESTAMP - INTERVAL '2 weeks' + INTERVAL '2 hours', 'Tottenham Hotspur Stadium', 'Premier League', 22800, false, '/api/placeholder/400/225');
 END $$;
 
+-- Normalize any roles to lowercase and valid set after mock inserts (defensive)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='users' AND column_name='role'
+  ) THEN
+    UPDATE public.users
+    SET role = CASE
+      WHEN lower(role::text) IN ('user','admin','moderator') THEN lower(role::text)
+      ELSE 'user'
+    END;
+  END IF;
+END $$;
+
 COMMIT;
 
 -- =====================================================

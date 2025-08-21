@@ -51,15 +51,39 @@ BEGIN
 END $$;
 
 -- 1) Define enum type userroleenum if not exists
+--    Ensure labels are strictly lowercase: ('user','admin','moderator')
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
                  WHERE t.typname = 'userroleenum' AND n.nspname = 'public') THEN
     CREATE TYPE public.userroleenum AS ENUM ('user','admin','moderator');
+  ELSE
+    -- In case the enum exists but is missing any expected lowercase label, add it safely.
+    PERFORM 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid WHERE t.typname='userroleenum' AND e.enumlabel='user';
+    IF NOT FOUND THEN
+      BEGIN
+        ALTER TYPE public.userroleenum ADD VALUE 'user';
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END;
+    END IF;
+    PERFORM 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid WHERE t.typname='userroleenum' AND e.enumlabel='admin';
+    IF NOT FOUND THEN
+      BEGIN
+        ALTER TYPE public.userroleenum ADD VALUE 'admin';
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END;
+    END IF;
+    PERFORM 1 FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid WHERE t.typname='userroleenum' AND e.enumlabel='moderator';
+    IF NOT FOUND THEN
+      BEGIN
+        ALTER TYPE public.userroleenum ADD VALUE 'moderator';
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END;
+    END IF;
   END IF;
 END $$;
 
-COMMENT ON TYPE public.userroleenum IS 'User role enumeration used by users.role';
+COMMENT ON TYPE public.userroleenum IS 'User role enumeration used by users.role (lowercase values only: user, admin, moderator).';
 
 -- 2) Create users table if it does not exist with full schema
 --    If it exists, we will adjust columns in subsequent steps.
@@ -174,6 +198,44 @@ ALTER TABLE public.users
 -- 6) Role column as enum with default 'user' and NOT NULL
 ALTER TABLE public.users
   ADD COLUMN IF NOT EXISTS role public.userroleenum;
+
+-- Data normalization BEFORE any type changes:
+-- Ensure any existing role values are lowercase and valid. This prevents casting issues and enforces a single standard.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='users' AND column_name='role'
+  ) THEN
+    -- Lowercase everything first (works for text/varchar/enum-to-text cast)
+    BEGIN
+      EXECUTE 'UPDATE public.users SET role = LOWER(role::text) WHERE role IS NOT NULL AND role::text <> LOWER(role::text)';
+    EXCEPTION WHEN others THEN
+      -- If role already enum, the ::text cast still works; ignore any warning-level issues
+      NULL;
+    END;
+
+    -- Map common variants and unknowns to safe values (only lowercase are allowed)
+    BEGIN
+      EXECUTE $sql$
+        UPDATE public.users
+        SET role = CASE
+          WHEN role::text IN ('user','admin','moderator') THEN role
+          WHEN role::text IN ('USER','User') THEN 'user'
+          WHEN role::text IN ('ADMIN','Admin') THEN 'admin'
+          WHEN role::text IN ('MODERATOR','Moderator','mod','Mod','MOD') THEN 'moderator'
+          ELSE 'user'
+        END
+        WHERE role IS NOT NULL AND role::text NOT IN ('user','admin','moderator')
+      $sql$;
+    EXCEPTION WHEN others THEN
+      NULL;
+    END;
+
+    -- Ensure no NULL remains to avoid NOT NULL/enum casting issues later
+    UPDATE public.users SET role = 'user' WHERE role IS NULL;
+  END IF;
+END $$;
 
 -- If role exists but is not of enum type, attempt safe conversion preserving values
 DO $$
