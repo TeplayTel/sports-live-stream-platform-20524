@@ -148,6 +148,57 @@ if [ -f "docker-entrypoint-initdb.d/01_widen_alembic_version.sql" ]; then
   sudo -u postgres ${PG_BIN}/psql -p ${DB_PORT} -d ${DB_NAME} -f docker-entrypoint-initdb.d/01_widen_alembic_version.sql || true
 fi
 
+# After PostgreSQL is ready and database/user setup is complete, apply migrations.
+echo "Applying SQL migrations from migrations/ (skipping deleted/removed 013_create_user_table.sql if present)..."
+
+# Ensure we can connect with the app user first; fall back to postgres if needed
+CONN_USER="${DB_USER}"
+CONN_DB="${DB_NAME}"
+if ! sudo -u postgres ${PG_BIN}/psql -p ${DB_PORT} -d "${CONN_DB}" -U "${CONN_USER}" -c '\q' >/dev/null 2>&1; then
+  echo "Warning: Could not connect with ${DB_USER}. Using postgres superuser to run migrations."
+  CONN_USER="postgres"
+fi
+
+# Wait until DB truly accepts connections to target DB (belt-and-suspenders)
+for i in {1..15}; do
+  if sudo -u postgres ${PG_BIN}/pg_isready -p ${DB_PORT} >/dev/null 2>&1; then
+    # Also try a lightweight query
+    if sudo -u postgres ${PG_BIN}/psql -p ${DB_PORT} -d "${CONN_DB}" -U "${CONN_USER}" -c 'SELECT 1;' >/dev/null 2>&1; then
+      break
+    fi
+  fi
+  echo "DB not ready for queries yet... ($i/15)"
+  sleep 2
+done
+
+MIGRATIONS_DIR="migrations"
+if [ -d "${MIGRATIONS_DIR}" ]; then
+  # Find all .sql files, sorted, excluding the removed/undesired one explicitly
+  mapfile -t MIG_FILES < <(ls -1 ${MIGRATIONS_DIR}/*.sql 2>/dev/null | sort)
+
+  if [ ${#MIG_FILES[@]} -eq 0 ]; then
+    echo "No migration files found in ${MIGRATIONS_DIR}."
+  else
+    for MIG in "${MIG_FILES[@]}"; do
+      BASENAME="$(basename "$MIG")"
+      if [[ "$BASENAME" == "013_create_user_table.sql" ]]; then
+        echo "Skipping removed/undesired migration: $BASENAME"
+        continue
+      fi
+
+      echo "Running migration: $BASENAME"
+      # Use sudo -u postgres to invoke psql, with effective db user determined by -U
+      if ! sudo -u postgres ${PG_BIN}/psql -p ${DB_PORT} -d "${CONN_DB}" -U "${CONN_USER}" -f "$MIG"; then
+        echo "Error applying migration: $BASENAME"
+        exit 1
+      fi
+    done
+    echo "All applicable migrations applied successfully."
+  fi
+else
+  echo "Migrations directory ${MIGRATIONS_DIR} not found; skipping migrations."
+fi
+
 echo "PostgreSQL setup complete!"
 echo "Database: ${DB_NAME}"
 echo "User: ${DB_USER}"
