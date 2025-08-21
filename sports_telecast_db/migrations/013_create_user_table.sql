@@ -1,13 +1,14 @@
--- Consolidated schema additions for singular "user" table
--- Note: Existing schema predominantly uses pluralized 'users' structures.
--- This file defines a minimal singular "user" table per the request example:
---   CREATE TABLE test_me (id SERIAL PRIMARY KEY);
-
--- The singular "user" table can serve specialized use-cases or be used for aliasing/mapping.
--- It does not conflict with existing 'users' table if present.
+-- Migration: 013_create_user_table.sql
+-- Purpose: Create a 'user' table for the sports telecast application.
+-- Notes:
+-- - Uses SERIAL for id for consistency with the example provided.
+-- - Includes common user fields to support backend API requirements in the project.
+-- - Enforces uniqueness on email and username.
+-- - Adds created_at and updated_at timestamps with sensible defaults.
 
 BEGIN;
 
+-- Create table only if it doesn't already exist to keep idempotency in dev setups.
 CREATE TABLE IF NOT EXISTS "user" (
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
@@ -16,17 +17,17 @@ CREATE TABLE IF NOT EXISTS "user" (
     full_name VARCHAR(255),
     avatar_url TEXT,
     role VARCHAR(20) NOT NULL DEFAULT 'user', -- user | admin | moderator
-    preferences JSONB DEFAULT '{}'::jsonb,
+    preferences JSONB DEFAULT '{}'::jsonb,    -- stores UserPreferences JSON
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Helpful indices
+-- Helpful indexes for lookups
 CREATE INDEX IF NOT EXISTS idx_user_email ON "user"(email);
 CREATE INDEX IF NOT EXISTS idx_user_username ON "user"(username);
 
--- Update updated_at on UPDATE
+-- Trigger to update updated_at on row modification
 DO $$
 BEGIN
     IF NOT EXISTS (

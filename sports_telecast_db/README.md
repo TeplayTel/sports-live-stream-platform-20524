@@ -98,6 +98,16 @@ Check the database status:
 
 ## Migration Files
 
+### `migrations/013_create_user_table.sql`
+Creates a singular table named "user" with:
+- id SERIAL PRIMARY KEY
+- email (unique), username (unique), password_hash
+- full_name, avatar_url
+- role (default 'user'), preferences JSONB
+- is_active, created_at, updated_at
+Includes indices on email and username and a trigger to auto-update updated_at.
+Note: The existing schema also uses a pluralized "users" table in other contexts; both can coexist.
+
 ### `migrations/001_initial_schema.sql`
 Creates the complete database schema including:
 - All tables with proper relationships

@@ -120,4 +120,18 @@ WHERE table_schema = 'public'
 AND data_type = 'uuid'
 ORDER BY table_name, column_name;
 
+-- Verify presence of singular "user" table (created by migration 013)
+-- This is a non-fatal presence check to aid CI visibility.
+DO $$
+DECLARE
+    user_tbl regclass;
+BEGIN
+    SELECT to_regclass('public.user') INTO user_tbl;
+    IF user_tbl IS NULL THEN
+        RAISE NOTICE '"user" table not found (ok if not used by current backend).';
+    ELSE
+        RAISE NOTICE '"user" table exists ✓';
+    END IF;
+END $$;
+
 RAISE NOTICE 'Schema validation completed successfully ✓';
