@@ -27,11 +27,7 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
-DO $$ BEGIN
-    CREATE TYPE user_role AS ENUM ('user', 'admin', 'moderator', 'premium');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+-- Note: Removed user_role ENUM in favor of VARCHAR(32) + CHECK constraint on users.role
 
 DO $$ BEGIN
     CREATE TYPE notification_type AS ENUM ('match_start', 'goal_scored', 'match_end', 'event_reminder', 'system');
@@ -57,7 +53,7 @@ CREATE TABLE IF NOT EXISTS users (
     date_of_birth DATE,
     phone VARCHAR(20),
     country_code VARCHAR(3),
-    role user_role NOT NULL DEFAULT 'user',
+    role VARCHAR(32) NOT NULL DEFAULT 'user',
     is_active BOOLEAN NOT NULL DEFAULT true,
     is_verified BOOLEAN NOT NULL DEFAULT false,
     last_login TIMESTAMP WITH TIME ZONE,
@@ -66,9 +62,10 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     
     -- Constraints
-    CONSTRAINT chk_users_email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
+    CONSTRAINT chk_users_email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'),
     CONSTRAINT chk_users_username_length CHECK (LENGTH(username) >= 3),
-    CONSTRAINT chk_users_phone_format CHECK (phone IS NULL OR phone ~* '^[\+]?[1-9][\d]{0,15}$')
+    CONSTRAINT chk_users_phone_format CHECK (phone IS NULL OR phone ~* '^[\\+]?[1-9][\\d]{0,15}$'),
+    CONSTRAINT chk_users_role CHECK (role IN ('user','admin','moderator'))
 );
 
 -- User profiles with extended preferences and settings
