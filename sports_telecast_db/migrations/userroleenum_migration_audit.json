@@ -1,0 +1,90 @@
+{
+  "generated_at": "2025-08-21T00:00:00Z",
+  "container": "sports_telecast_db",
+  "enum_expected": {
+    "type_name": "userroleenum",
+    "labels": ["user", "admin", "moderator"],
+    "case": "lowercase",
+    "default": "user"
+  },
+  "migrations_detected": [
+    {
+      "file": "001_initial_schema.sql",
+      "role_definition": "VARCHAR(20) with CHECK (lowercase only)",
+      "enum_defined": false,
+      "notes": "Initial table; role allowed values lowercase only."
+    },
+    {
+      "file": "001_initial_schema_fixed.sql",
+      "role_definition": "VARCHAR(20) with CHECK (lowercase only)",
+      "enum_defined": false,
+      "notes": "Same as 001 with minor fixes."
+    },
+    {
+      "file": "003_comprehensive_seed_data.sql",
+      "role_definition": "Role normalization DO block to lowercase set ('user','admin','moderator')",
+      "enum_defined": false,
+      "notes": "Defensive normalization after mock inserts."
+    },
+    {
+      "file": "004_realistic_mock_data.sql",
+      "role_definition": "Inserts uppercase role values ('USER','ADMIN','MODERATOR')",
+      "enum_defined": false,
+      "risk": "HIGH",
+      "notes": "Unsafe once enum is enforced; can cause InvalidTextRepresentationError."
+    },
+    {
+      "file": "005_corrected_mock_data.sql",
+      "role_definition": "Inserts uppercase role values (legacy)",
+      "enum_defined": false,
+      "risk": "HIGH",
+      "notes": "Same risk as 004."
+    },
+    {
+      "file": "007_comprehensive_schema_migration.sql",
+      "role_definition": "users.role type user_role ENUM ('user','admin','moderator','premium')",
+      "enum_defined": true,
+      "enum_type": "user_role",
+      "risk": "MEDIUM",
+      "notes": "Divergent enum type and labels; not aligned with backend (userroleenum)."
+    },
+    {
+      "file": "013_add_users_preferences_column.sql",
+      "role_definition": "No change to role enum",
+      "enum_defined": "unchanged",
+      "notes": "Adds preferences JSONB with default."
+    },
+    {
+      "file": "014_align_users_table_and_userroleenum.sql",
+      "role_definition": "users.role type userroleenum ENUM ('user','admin','moderator'), default 'user'",
+      "enum_defined": true,
+      "enum_type": "userroleenum",
+      "risk": "LOW",
+      "notes": "Normalizes role values, converts column type safely, enforces lowercase enum."
+    },
+    {
+      "file": "015_users_role_to_userroleenum.sql",
+      "role_definition": "Reinforces conversion to userroleenum ENUM ('user','admin','moderator')",
+      "enum_defined": true,
+      "enum_type": "userroleenum",
+      "risk": "LOW",
+      "notes": "Idempotent; ensures alignment if 014 was skipped."
+    }
+  ],
+  "discrepancies": [
+    {
+      "type": "uppercase_role_inserts",
+      "sources": ["004_realistic_mock_data.sql", "005_corrected_mock_data.sql"],
+      "impact": "Inserting uppercase labels into userroleenum causes InvalidTextRepresentationError",
+      "mitigation": "Run 014/015 migrations and ensure inserts use lowercase or omit role to use default 'user'."
+    },
+    {
+      "type": "enum_type_mismatch",
+      "sources": ["007_comprehensive_schema_migration.sql"],
+      "impact": "users.role may be type user_role (not userroleenum) and allow 'premium'; backend expects userroleenum",
+      "mitigation": "Apply 014 then 015 to convert to userroleenum; map unknown roles to 'user'."
+    }
+  ],
+  "verification_sql": "See migrations/userroleenum_verification_checklist.sql",
+  "backend_expectation_reference": "sports-live-stream-platform-20522/sports_telecast_backend/interfaces/openapi.json (components.schemas.UserRole)"
+}

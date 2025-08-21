@@ -1,0 +1,27 @@
+UserRoleEnum Discrepancy Summary
+
+Backend expectation:
+- Enum type: userroleenum
+- Labels: 'user','admin','moderator' (lowercase only)
+- Default: 'user'
+
+What migrations define:
+- 014 and 015: Create/ensure public.userroleenum (lowercase), convert users.role to this enum, normalize legacy values.
+- 001/003: users.role was VARCHAR with a lowercase-only CHECK constraint (no enum yet).
+- 004/005: Legacy mock data used UPPERCASE role values; unsafe once enum is enforced.
+- 007: Divergent enum 'user_role' with labels ('user','admin','moderator','premium'); not aligned with backend.
+
+Most likely cause of InvalidTextRepresentationError on /auth/register:
+- Inserting an uppercase or unknown role label into users.role of type userroleenum.
+- Or DB schema using 'user_role' instead of 'userroleenum', leading to type/label mismatch.
+
+Action items:
+1) Verify enum labels and users.role column type (see userroleenum_verification_checklist.sql).
+2) If misaligned, run migrations 014 and 015 to normalize and convert.
+3) Ensure backend sends lowercase role values or omits role to use default 'user'.
+4) Avoid running legacy 004/005 scripts against environments with enum role.
+
+Reference files:
+- migrations/userroleenum_analysis_report.md
+- migrations/userroleenum_verification_checklist.sql
+- USERROLEENUM_README.md
