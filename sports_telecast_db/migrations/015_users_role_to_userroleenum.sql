@@ -1,257 +1,257 @@
--- Migration: 015_users_role_to_userroleenum.sql
--- Purpose:
---   1) Ensure enum type userroleenum exists with values ('user','admin','moderator')
---   2) Normalize existing users.role values to match enum values (lowercase)
---   3) Alter users.role column to use userroleenum with DEFAULT 'user' and NOT NULL preserved
---   4) Idempotent: safe to run multiple times without error
---
--- Notes for maintainers:
---   - This migration aligns DB with backend ORM/OpenAPI expectations (lowercase role values).
---   - Uses a temporary column swap for safe casting even if existing column isn't enum yet.
---   - Preserves existing NOT NULL constraint if present.
---   - Default is set to 'user'.
---
--- Transactional safety
-BEGIN;
+-- -- Migration: 015_users_role_to_userroleenum.sql
+-- -- Purpose:
+-- --   1) Ensure enum type userroleenum exists with values ('user','admin','moderator')
+-- --   2) Normalize existing users.role values to match enum values (lowercase)
+-- --   3) Alter users.role column to use userroleenum with DEFAULT 'user' and NOT NULL preserved
+-- --   4) Idempotent: safe to run multiple times without error
+-- --
+-- -- Notes for maintainers:
+-- --   - This migration aligns DB with backend ORM/OpenAPI expectations (lowercase role values).
+-- --   - Uses a temporary column swap for safe casting even if existing column isn't enum yet.
+-- --   - Preserves existing NOT NULL constraint if present.
+-- --   - Default is set to 'user'.
+-- --
+-- -- Transactional safety
+-- BEGIN;
 
--- 1) Ensure the enum type exists with the correct labels
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userroleenum') THEN
-        CREATE TYPE userroleenum AS ENUM ('user', 'admin', 'moderator');
-    ELSE
-        -- Ensure all expected enum values exist (add missing labels if any)
-        -- This is harmless if the value already exists.
-        BEGIN
-            -- Add 'user'
-            DO $inner$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM pg_enum e
-                    JOIN pg_type t ON t.oid = e.enumtypid
-                    WHERE t.typname = 'userroleenum' AND e.enumlabel = 'user'
-                ) THEN
-                    ALTER TYPE userroleenum ADD VALUE 'user';
-                END IF;
-            END
-            $inner$;
+-- -- 1) Ensure the enum type exists with the correct labels
+-- DO $$
+-- BEGIN
+--     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userroleenum') THEN
+--         CREATE TYPE userroleenum AS ENUM ('user', 'admin', 'moderator');
+--     ELSE
+--         -- Ensure all expected enum values exist (add missing labels if any)
+--         -- This is harmless if the value already exists.
+--         BEGIN
+--             -- Add 'user'
+--             DO $inner$
+--             BEGIN
+--                 IF NOT EXISTS (
+--                     SELECT 1
+--                     FROM pg_enum e
+--                     JOIN pg_type t ON t.oid = e.enumtypid
+--                     WHERE t.typname = 'userroleenum' AND e.enumlabel = 'user'
+--                 ) THEN
+--                     ALTER TYPE userroleenum ADD VALUE 'user';
+--                 END IF;
+--             END
+--             $inner$;
 
-            -- Add 'admin'
-            DO $inner$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM pg_enum e
-                    JOIN pg_type t ON t.oid = e.enumtypid
-                    WHERE t.typname = 'userroleenum' AND e.enumlabel = 'admin'
-                ) THEN
-                    ALTER TYPE userroleenum ADD VALUE 'admin';
-                END IF;
-            END
-            $inner$;
+--             -- Add 'admin'
+--             DO $inner$
+--             BEGIN
+--                 IF NOT EXISTS (
+--                     SELECT 1
+--                     FROM pg_enum e
+--                     JOIN pg_type t ON t.oid = e.enumtypid
+--                     WHERE t.typname = 'userroleenum' AND e.enumlabel = 'admin'
+--                 ) THEN
+--                     ALTER TYPE userroleenum ADD VALUE 'admin';
+--                 END IF;
+--             END
+--             $inner$;
 
-            -- Add 'moderator'
-            DO $inner$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM pg_enum e
-                    JOIN pg_type t ON t.oid = e.enumtypid
-                    WHERE t.typname = 'userroleenum' AND e.enumlabel = 'moderator'
-                ) THEN
-                    ALTER TYPE userroleenum ADD VALUE 'moderator';
-                END IF;
-            END
-            $inner$;
-        EXCEPTION
-            WHEN duplicate_object THEN
-                -- Concurrent add or already exists; ignore
-                NULL;
-        END;
-    END IF;
-END$$;
+--             -- Add 'moderator'
+--             DO $inner$
+--             BEGIN
+--                 IF NOT EXISTS (
+--                     SELECT 1
+--                     FROM pg_enum e
+--                     JOIN pg_type t ON t.oid = e.enumtypid
+--                     WHERE t.typname = 'userroleenum' AND e.enumlabel = 'moderator'
+--                 ) THEN
+--                     ALTER TYPE userroleenum ADD VALUE 'moderator';
+--                 END IF;
+--             END
+--             $inner$;
+--         EXCEPTION
+--             WHEN duplicate_object THEN
+--                 -- Concurrent add or already exists; ignore
+--                 NULL;
+--         END;
+--     END IF;
+-- END$$;
 
--- 2) Ensure users table exists (idempotent guard)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'users'
-    ) THEN
-        RAISE NOTICE 'Table public.users does not exist; skipping role enum migration.';
-    END IF;
-END$$;
+-- -- 2) Ensure users table exists (idempotent guard)
+-- DO $$
+-- BEGIN
+--     IF NOT EXISTS (
+--         SELECT 1 FROM information_schema.tables
+--         WHERE table_schema = 'public' AND table_name = 'users'
+--     ) THEN
+--         RAISE NOTICE 'Table public.users does not exist; skipping role enum migration.';
+--     END IF;
+-- END$$;
 
--- 3) Normalize existing role values to lowercase 'user' | 'admin' | 'moderator'
---    Only execute if users table exists and column role exists.
---    This step ensures no stray uppercase or unexpected variants remain prior to enum conversion.
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role'
-    ) THEN
-        -- Update any non-null role values to lowercase (works for varchar/text)
-        EXECUTE $sql$
-            UPDATE public.users
-            SET role = LOWER(role)
-            WHERE role IS NOT NULL
-              AND role <> LOWER(role)
-        $sql$;
+-- -- 3) Normalize existing role values to lowercase 'user' | 'admin' | 'moderator'
+-- --    Only execute if users table exists and column role exists.
+-- --    This step ensures no stray uppercase or unexpected variants remain prior to enum conversion.
+-- DO $$
+-- BEGIN
+--     IF EXISTS (
+--         SELECT 1
+--         FROM information_schema.columns
+--         WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role'
+--     ) THEN
+--         -- Update any non-null role values to lowercase (works for varchar/text)
+--         EXECUTE $sql$
+--             UPDATE public.users
+--             SET role = LOWER(role)
+--             WHERE role IS NOT NULL
+--               AND role <> LOWER(role)
+--         $sql$;
 
-        -- Map common variants to valid enum labels, default to 'user' for anything unknown
-        EXECUTE $sql$
-            UPDATE public.users
-            SET role = CASE
-                WHEN role IN ('user','admin','moderator') THEN role
-                WHEN role IN ('USER','User') THEN 'user'
-                WHEN role IN ('ADMIN','Admin') THEN 'admin'
-                WHEN role IN ('MODERATOR','Moderator','mod','Mod','MOD') THEN 'moderator'
-                ELSE 'user'
-            END
-            WHERE role IS NOT NULL AND role NOT IN ('user','admin','moderator')
-        $sql$;
+--         -- Map common variants to valid enum labels, default to 'user' for anything unknown
+--         EXECUTE $sql$
+--             UPDATE public.users
+--             SET role = CASE
+--                 WHEN role IN ('user','admin','moderator') THEN role
+--                 WHEN role IN ('USER','User') THEN 'user'
+--                 WHEN role IN ('ADMIN','Admin') THEN 'admin'
+--                 WHEN role IN ('MODERATOR','Moderator','mod','Mod','MOD') THEN 'moderator'
+--                 ELSE 'user'
+--             END
+--             WHERE role IS NOT NULL AND role NOT IN ('user','admin','moderator')
+--         $sql$;
 
-        -- Ensure NULLs are set to 'user'
-        EXECUTE $sql$
-            UPDATE public.users SET role = 'user' WHERE role IS NULL
-        $sql$;
-    END IF;
-END$$;
+--         -- Ensure NULLs are set to 'user'
+--         EXECUTE $sql$
+--             UPDATE public.users SET role = 'user' WHERE role IS NULL
+--         $sql$;
+--     END IF;
+-- END$$;
 
--- 4) Change column to enum type userroleenum with default 'user' in an idempotent way.
---    We use a temporary column approach to avoid issues when changing from text/varchar to enum.
-DO $$
-DECLARE
-    col_data_type TEXT;
-    has_default BOOLEAN := FALSE;
-    has_not_null BOOLEAN := FALSE;
-BEGIN
-    -- Only proceed if users.role exists
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role'
-    ) THEN
-        -- Determine current data type
-        SELECT data_type
-        INTO col_data_type
-        FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role';
+-- -- 4) Change column to enum type userroleenum with default 'user' in an idempotent way.
+-- --    We use a temporary column approach to avoid issues when changing from text/varchar to enum.
+-- DO $$
+-- DECLARE
+--     col_data_type TEXT;
+--     has_default BOOLEAN := FALSE;
+--     has_not_null BOOLEAN := FALSE;
+-- BEGIN
+--     -- Only proceed if users.role exists
+--     IF EXISTS (
+--         SELECT 1 FROM information_schema.columns
+--         WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role'
+--     ) THEN
+--         -- Determine current data type
+--         SELECT data_type
+--         INTO col_data_type
+--         FROM information_schema.columns
+--         WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role';
 
-        -- Detect NOT NULL constraint
-        SELECT (is_nullable = 'NO') INTO has_not_null
-        FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role';
+--         -- Detect NOT NULL constraint
+--         SELECT (is_nullable = 'NO') INTO has_not_null
+--         FROM information_schema.columns
+--         WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role';
 
-        -- Detect existing default
-        SELECT EXISTS (
-            SELECT 1
-            FROM pg_attrdef d
-            JOIN pg_class c ON c.oid = d.adrelid
-            JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.adnum
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public' AND c.relname = 'users' AND a.attname = 'role'
-        ) INTO has_default;
+--         -- Detect existing default
+--         SELECT EXISTS (
+--             SELECT 1
+--             FROM pg_attrdef d
+--             JOIN pg_class c ON c.oid = d.adrelid
+--             JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.adnum
+--             JOIN pg_namespace n ON n.oid = c.relnamespace
+--             WHERE n.nspname = 'public' AND c.relname = 'users' AND a.attname = 'role'
+--         ) INTO has_default;
 
-        -- If role is already userroleenum, just ensure default and not null, then exit this block.
-        IF col_data_type = 'USER-DEFINED' AND EXISTS (
-            SELECT 1
-            FROM pg_type t
-            JOIN information_schema.columns ic
-              ON ic.udt_name = t.typname
-            WHERE t.typname = 'userroleenum'
-              AND ic.table_name = 'users'
-              AND ic.column_name = 'role'
-        ) THEN
-            -- Ensure DEFAULT 'user'
-            EXECUTE 'ALTER TABLE public.users ALTER COLUMN role SET DEFAULT ''user''::userroleenum';
-            -- Ensure NOT NULL if it previously was not-null by design choice; here we enforce NOT NULL.
-            EXECUTE 'ALTER TABLE public.users ALTER COLUMN role SET NOT NULL';
-        ELSE
-            -- We need to convert the column type to enum.
-            -- Create a temporary column if not exists
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_tmp_enum'
-            ) THEN
-                EXECUTE 'ALTER TABLE public.users ADD COLUMN role_tmp_enum userroleenum';
-            END IF;
+--         -- If role is already userroleenum, just ensure default and not null, then exit this block.
+--         IF col_data_type = 'USER-DEFINED' AND EXISTS (
+--             SELECT 1
+--             FROM pg_type t
+--             JOIN information_schema.columns ic
+--               ON ic.udt_name = t.typname
+--             WHERE t.typname = 'userroleenum'
+--               AND ic.table_name = 'users'
+--               AND ic.column_name = 'role'
+--         ) THEN
+--             -- Ensure DEFAULT 'user'
+--             EXECUTE 'ALTER TABLE public.users ALTER COLUMN role SET DEFAULT ''user''::userroleenum';
+--             -- Ensure NOT NULL if it previously was not-null by design choice; here we enforce NOT NULL.
+--             EXECUTE 'ALTER TABLE public.users ALTER COLUMN role SET NOT NULL';
+--         ELSE
+--             -- We need to convert the column type to enum.
+--             -- Create a temporary column if not exists
+--             IF NOT EXISTS (
+--                 SELECT 1 FROM information_schema.columns
+--                 WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_tmp_enum'
+--             ) THEN
+--                 EXECUTE 'ALTER TABLE public.users ADD COLUMN role_tmp_enum userroleenum';
+--             END IF;
 
-            -- Fill temporary column by casting from text -> enum via safe CAST
-            -- Since we've normalized values to valid enum labels, this cast should succeed.
-            EXECUTE 'UPDATE public.users SET role_tmp_enum = role::userroleenum';
+--             -- Fill temporary column by casting from text -> enum via safe CAST
+--             -- Since we've normalized values to valid enum labels, this cast should succeed.
+--             EXECUTE 'UPDATE public.users SET role_tmp_enum = role::userroleenum';
 
-            -- Drop default on original column to avoid dependency issues during rename
-            IF has_default THEN
-                EXECUTE 'ALTER TABLE public.users ALTER COLUMN role DROP DEFAULT';
-            END IF;
+--             -- Drop default on original column to avoid dependency issues during rename
+--             IF has_default THEN
+--                 EXECUTE 'ALTER TABLE public.users ALTER COLUMN role DROP DEFAULT';
+--             END IF;
 
-            -- Drop NOT NULL temporarily to allow rename/drop operations
-            IF has_not_null THEN
-                EXECUTE 'ALTER TABLE public.users ALTER COLUMN role DROP NOT NULL';
-            END IF;
+--             -- Drop NOT NULL temporarily to allow rename/drop operations
+--             IF has_not_null THEN
+--                 EXECUTE 'ALTER TABLE public.users ALTER COLUMN role DROP NOT NULL';
+--             END IF;
 
-            -- Drop the original column and rename temp to role atomically:
-            -- Instead of DROP first (which would lose data if constraints fail), do rename then drop old.
-            -- We'll use column swap technique:
-            -- 1) Rename old role -> role_old
-            -- 2) Rename role_tmp_enum -> role
-            -- 3) Drop role_old
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_old'
-            ) THEN
-                EXECUTE 'ALTER TABLE public.users RENAME COLUMN role TO role_old';
-            END IF;
+--             -- Drop the original column and rename temp to role atomically:
+--             -- Instead of DROP first (which would lose data if constraints fail), do rename then drop old.
+--             -- We'll use column swap technique:
+--             -- 1) Rename old role -> role_old
+--             -- 2) Rename role_tmp_enum -> role
+--             -- 3) Drop role_old
+--             IF NOT EXISTS (
+--                 SELECT 1 FROM information_schema.columns
+--                 WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_old'
+--             ) THEN
+--                 EXECUTE 'ALTER TABLE public.users RENAME COLUMN role TO role_old';
+--             END IF;
 
-            -- If a previous partial run left role already renamed, make sure temp exists and is populated.
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_tmp_enum'
-            ) THEN
-                EXECUTE 'ALTER TABLE public.users ADD COLUMN role_tmp_enum userroleenum';
-                EXECUTE 'UPDATE public.users SET role_tmp_enum = COALESCE(role_old::text, ''user'')::userroleenum';
-            END IF;
+--             -- If a previous partial run left role already renamed, make sure temp exists and is populated.
+--             IF NOT EXISTS (
+--                 SELECT 1 FROM information_schema.columns
+--                 WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_tmp_enum'
+--             ) THEN
+--                 EXECUTE 'ALTER TABLE public.users ADD COLUMN role_tmp_enum userroleenum';
+--                 EXECUTE 'UPDATE public.users SET role_tmp_enum = COALESCE(role_old::text, ''user'')::userroleenum';
+--             END IF;
 
-            -- Rename temp to role if not already
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role'
-            ) THEN
-                EXECUTE 'ALTER TABLE public.users RENAME COLUMN role_tmp_enum TO role';
-            END IF;
+--             -- Rename temp to role if not already
+--             IF NOT EXISTS (
+--                 SELECT 1 FROM information_schema.columns
+--                 WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role'
+--             ) THEN
+--                 EXECUTE 'ALTER TABLE public.users RENAME COLUMN role_tmp_enum TO role';
+--             END IF;
 
-            -- Ensure final column is of correct type (defensive)
-            PERFORM 1
-            FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = 'users'
-              AND column_name = 'role' AND udt_name = 'userroleenum';
+--             -- Ensure final column is of correct type (defensive)
+--             PERFORM 1
+--             FROM information_schema.columns
+--             WHERE table_schema = 'public' AND table_name = 'users'
+--               AND column_name = 'role' AND udt_name = 'userroleenum';
 
-            -- Set default and not null as required
-            EXECUTE 'ALTER TABLE public.users ALTER COLUMN role SET DEFAULT ''user''::userroleenum';
-            EXECUTE 'ALTER TABLE public.users ALTER COLUMN role SET NOT NULL';
+--             -- Set default and not null as required
+--             EXECUTE 'ALTER TABLE public.users ALTER COLUMN role SET DEFAULT ''user''::userroleenum';
+--             EXECUTE 'ALTER TABLE public.users ALTER COLUMN role SET NOT NULL';
 
-            -- Clean up: drop the old column if exists
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_old'
-            ) THEN
-                EXECUTE 'ALTER TABLE public.users DROP COLUMN role_old';
-            END IF;
+--             -- Clean up: drop the old column if exists
+--             IF EXISTS (
+--                 SELECT 1 FROM information_schema.columns
+--                 WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_old'
+--             ) THEN
+--                 EXECUTE 'ALTER TABLE public.users DROP COLUMN role_old';
+--             END IF;
 
-            -- Clean up: if temp still exists for any reason, drop it
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_tmp_enum'
-            ) THEN
-                EXECUTE 'ALTER TABLE public.users DROP COLUMN role_tmp_enum';
-            END IF;
-        END IF;
-    END IF;
-END$$;
+--             -- Clean up: if temp still exists for any reason, drop it
+--             IF EXISTS (
+--                 SELECT 1 FROM information_schema.columns
+--                 WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'role_tmp_enum'
+--             ) THEN
+--                 EXECUTE 'ALTER TABLE public.users DROP COLUMN role_tmp_enum';
+--             END IF;
+--         END IF;
+--     END IF;
+-- END$$;
 
-COMMIT;
+-- COMMIT;
 
--- End of migration
+-- -- End of migration
